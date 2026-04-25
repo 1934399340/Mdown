@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import com.markdowneditor.viewModel.EditorViewModel
 
@@ -12,7 +13,11 @@ fun EditorScreen(
     fileName: String,
     viewModel: EditorViewModel = EditorViewModel()
 ) {
-    var viewMode by remember { mutableStateOf(EditorViewMode.PREVIEW) }
+    val configuration = LocalConfiguration.current
+    val isTablet = configuration.smallestScreenWidthDp >= 600
+    
+    // 平板电脑默认使用分屏模式
+    var viewMode by remember { mutableStateOf(if (isTablet) EditorViewMode.SPLIT else EditorViewMode.PREVIEW) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         TopAppBar(
