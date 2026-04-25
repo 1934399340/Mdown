@@ -1,5 +1,11 @@
 package com.markdowneditor.viewModel
 
+import android.content.Context
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import android.content.Intent
+import android.os.Bundle
 import androidx.lifecycle.ViewModel
 
 class EditorViewModel : ViewModel() {
@@ -7,6 +13,8 @@ class EditorViewModel : ViewModel() {
     val markdownText: String get() = _markdownText
     private var _cursorPosition = 0
     val cursorPosition: Int get() = _cursorPosition
+    private var speechRecognizer: SpeechRecognizer? = null
+    private var isListening = false
 
     fun updateText(text: String) {
         _markdownText = text
@@ -49,15 +57,12 @@ class EditorViewModel : ViewModel() {
         
         val table = buildString {
             // 表头
-            append("| ".repeat(columns)).append("|
-")
+            append("| ".repeat(columns)).append("|\n")
             // 分隔线
-            append("| -".repeat(columns)).append("|
-")
+            append("| -".repeat(columns)).append("|\n")
             // 数据行
             repeat(rows) {
-                append("| ".repeat(columns)).append("|
-")
+                append("| ".repeat(columns)).append("|\n")
             }
         }
         
@@ -126,5 +131,77 @@ class EditorViewModel : ViewModel() {
         val rule = "\n---\n"
         _markdownText = beforeCursor + rule + afterCursor
         _cursorPosition += rule.length
+    }
+
+    // 开始语音输入
+    fun startVoiceInput(context: Context, onError: (String) -> Unit) {
+        if (SpeechRecognizer.isRecognitionAvailable(context)) {
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context)
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault())
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "开始说话...")
+            }
+            
+            speechRecognizer?.setRecognitionListener(object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) {}
+                override fun onBeginningOfSpeech() {}
+                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onBufferReceived(buffer: ByteArray?) {}
+                override fun onEndOfSpeech() {}
+                override fun onError(error: Int) {
+                    isListening = false
+                    val errorMessage = when (error) {
+                        SpeechRecognizer.ERROR_AUDIO -> "音频错误"
+                        SpeechRecognizer.ERROR_CLIENT -> "客户端错误"
+                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "权限不足"
+                        SpeechRecognizer.ERROR_NETWORK -> "网络错误"
+                        SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "网络超时"
+                        SpeechRecognizer.ERROR_NO_MATCH -> "无匹配结果"
+                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "识别器忙"
+                        SpeechRecognizer.ERROR_SERVER -> "服务器错误"
+                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "语音超时"
+                        else -> "未知错误"
+                    }
+                    onError(errorMessage)
+                }
+                override fun onResults(results: Bundle?) {
+                    isListening = false
+                    val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    matches?.firstOrNull()?.let { text ->
+                        val beforeCursor = _markdownText.substring(0, _cursorPosition)
+                        val afterCursor = _markdownText.substring(_cursorPosition)
+                        _markdownText = beforeCursor + text + afterCursor
+                        _cursorPosition += text.length
+                    }
+                }
+                override fun onPartialResults(partialResults: Bundle?) {}
+                override fun onEvent(eventType: Int, params: Bundle?) {}
+            })
+            
+            speechRecognizer?.startListening(intent)
+            isListening = true
+        } else {
+            onError("语音输入不可用")
+        }
+    }
+
+    // 停止语音输入
+    fun stopVoiceInput() {
+        speechRecognizer?.stopListening()
+        speechRecognizer?.destroy()
+        speechRecognizer = null
+        isListening = false
+    }
+
+    // 检查是否正在语音输入
+    fun isVoiceInputActive(): Boolean {
+        return isListening
+    }
+
+    // 清理资源
+    override fun onCleared() {
+        super.onCleared()
+        stopVoiceInput()
     }
 }

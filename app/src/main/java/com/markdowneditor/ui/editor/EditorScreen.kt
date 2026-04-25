@@ -1,17 +1,26 @@
 package com.markdowneditor.ui.editor
 
+import android.Manifest
+import android.content.Context
 import android.view.KeyEvent
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 import com.markdowneditor.viewModel.EditorViewModel
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.rememberPermissionState
 
+@OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun EditorScreen(
     fileName: String,
@@ -22,9 +31,34 @@ fun EditorScreen(
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val view = LocalView.current
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     
     // 平板电脑默认使用分屏模式
     var viewMode by remember { mutableStateOf(if (isTablet) EditorViewMode.SPLIT else EditorViewMode.PREVIEW) }
+    var showPermissionRationale by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    
+    // 录音权限
+    val recordAudioPermission = rememberPermissionState(Manifest.permission.RECORD_AUDIO) {
+        if (it) {
+            // 权限授予，开始语音输入
+            viewModel.startVoiceInput(context) { error ->
+                errorMessage = error
+            }
+        } else {
+            showPermissionRationale = true
+        }
+    }
+    
+    // 处理错误消息
+    errorMessage?.let {
+        LaunchedEffect(it) {
+            // 显示错误消息
+            // 实际实现中可以使用Snackbar或Toast
+            errorMessage = null
+        }
+    }
 
     // 键盘事件处理
     DisposableEffect(Unit) {
@@ -167,6 +201,21 @@ fun EditorScreen(
         TopAppBar(
             title = { Text(fileName) },
             actions = {
+                IconButton(onClick = { 
+                    if (recordAudioPermission.hasPermission) {
+                        if (viewModel.isVoiceInputActive()) {
+                            viewModel.stopVoiceInput()
+                        } else {
+                            viewModel.startVoiceInput(context) { error ->
+                                errorMessage = error
+                            }
+                        }
+                    } else {
+                        recordAudioPermission.launchPermissionRequest()
+                    }
+                }) {
+                    Text(if (viewModel.isVoiceInputActive()) "停止" else "语音")
+                }
                 IconButton(onClick = { /* 实际实现中保存文件 */ }) {
                     Text("保存")
                 }

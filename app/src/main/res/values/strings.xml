@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Markdown Editor</string>
+    <string name="voice_input_start">开始语音输入</string>
+    <string name="voice_input_stop">停止语音输入</string>
+    <string name="voice_input_permission_denied">需要录音权限才能使用语音输入</string>
+    <string name="voice_input_not_available">语音输入不可用</string>
+</resources>
