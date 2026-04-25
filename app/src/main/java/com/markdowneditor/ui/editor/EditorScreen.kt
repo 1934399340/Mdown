@@ -154,6 +154,27 @@ fun EditorScreen(
                         viewModel.insertHorizontalRule()
                         return@OnKeyListener true
                     }
+                    // 高级Markdown功能
+                    event.isCtrlPressed && event.isShiftPressed && keyCode == KeyEvent.KEYCODE_F -> {
+                        viewModel.insertFootnote()
+                        return@OnKeyListener true
+                    }
+                    event.isCtrlPressed && event.isShiftPressed && keyCode == KeyEvent.KEYCODE_A -> {
+                        viewModel.insertAbbreviation()
+                        return@OnKeyListener true
+                    }
+                    event.isCtrlPressed && event.isAltPressed && keyCode == KeyEvent.KEYCODE_S -> {
+                        viewModel.insertStrikethrough()
+                        return@OnKeyListener true
+                    }
+                    event.isCtrlPressed && event.isShiftPressed && keyCode == KeyEvent.KEYCODE_L -> {
+                        viewModel.insertTaskList()
+                        return@OnKeyListener true
+                    }
+                    event.isCtrlPressed && event.isAltPressed && keyCode == KeyEvent.KEYCODE_L -> {
+                        viewModel.insertAutoLink()
+                        return@OnKeyListener true
+                    }
                     
                     // 编辑操作
                     event.isCtrlPressed && keyCode == KeyEvent.KEYCODE_Z -> {

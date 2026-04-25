@@ -133,6 +133,53 @@ class EditorViewModel : ViewModel() {
         _cursorPosition += rule.length
     }
 
+    // 插入脚注
+    fun insertFootnote() {
+        val beforeCursor = _markdownText.substring(0, _cursorPosition)
+        val afterCursor = _markdownText.substring(_cursorPosition)
+        val footnote = "[^1]"
+        val footnoteDefinition = "\n\n[^1]: 脚注内容"
+        _markdownText = beforeCursor + footnote + afterCursor + footnoteDefinition
+        _cursorPosition += footnote.length
+    }
+
+    // 插入缩写
+    fun insertAbbreviation() {
+        val beforeCursor = _markdownText.substring(0, _cursorPosition)
+        val afterCursor = _markdownText.substring(_cursorPosition)
+        val abbreviation = "HTML"
+        val abbreviationDefinition = "\n\n*[HTML]: Hyper Text Markup Language"
+        _markdownText = beforeCursor + abbreviation + afterCursor + abbreviationDefinition
+        _cursorPosition += abbreviation.length
+    }
+
+    // 插入删除线
+    fun insertStrikethrough() {
+        val beforeCursor = _markdownText.substring(0, _cursorPosition)
+        val afterCursor = _markdownText.substring(_cursorPosition)
+        val strikethrough = "~~文本~~"
+        _markdownText = beforeCursor + strikethrough + afterCursor
+        _cursorPosition += "~~文本".length
+    }
+
+    // 插入任务列表
+    fun insertTaskList() {
+        val beforeCursor = _markdownText.substring(0, _cursorPosition)
+        val afterCursor = _markdownText.substring(_cursorPosition)
+        val taskList = "- [ ] 任务1\n- [x] 任务2\n"
+        _markdownText = beforeCursor + taskList + afterCursor
+        _cursorPosition += "- [ ] 任务1\n".length
+    }
+
+    // 插入自动链接
+    fun insertAutoLink() {
+        val beforeCursor = _markdownText.substring(0, _cursorPosition)
+        val afterCursor = _markdownText.substring(_cursorPosition)
+        val autoLink = "<https://example.com>"
+        _markdownText = beforeCursor + autoLink + afterCursor
+        _cursorPosition += autoLink.length
+    }
+
     // 开始语音输入
     fun startVoiceInput(context: Context, onError: (String) -> Unit) {
         if (SpeechRecognizer.isRecognitionAvailable(context)) {
