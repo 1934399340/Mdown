@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <external-path name="downloads" path="Download/Mdown" />
+    <external-files-path name="root" path="." />
+    <external-files-path name="shared_files" path="shared/" />
+    <files-path name="internal_shared" path="shared/" />
+    <cache-path name="temp_cache" path="." />
+</paths>

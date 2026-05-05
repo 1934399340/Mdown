@@ -11,5 +11,6 @@ data class MarkdownFile(
     val fileName: String,
     val filePath: String,
     val lastModified: Date,
-    val size: Long
+    val size: Long,
+    val isDirectory: Boolean = false
 )

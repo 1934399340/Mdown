@@ -19,4 +19,7 @@ interface FileDao {
 
     @Query("DELETE FROM markdown_files WHERE id = :id")
     suspend fun deleteById(id: Int)
+
+    @androidx.room.Delete
+    suspend fun delete(file: MarkdownFile)
 }
