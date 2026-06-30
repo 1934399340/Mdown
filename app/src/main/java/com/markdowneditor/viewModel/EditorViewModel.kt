@@ -8,12 +8,17 @@ import android.webkit.WebView
 import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.markdowneditor.data.repository.ApiKeyRepository
+import com.markdowneditor.network.AiService
 import com.markdowneditor.utils.ExportManager
 import com.markdowneditor.utils.FileManager
 import com.markdowneditor.utils.MarkdownRenderer
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -24,7 +29,9 @@ import javax.inject.Inject
 
 @HiltViewModel
 class EditorViewModel @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val aiService: AiService,
+    private val apiKeyRepository: ApiKeyRepository
 ) : ViewModel() {
 
     private val _markdownText = MutableStateFlow("")
@@ -71,6 +78,16 @@ class EditorViewModel @Inject constructor(
     private val redoStack = mutableListOf<String>()
     private val maxUndoDepth = 50
 
+    // AI 聊天状态
+    private val _aiPrompt = MutableStateFlow("")
+    val aiPrompt: StateFlow<String> get() = _aiPrompt
+
+    private val _isAiLoading = MutableStateFlow(false)
+    val isAiLoading: StateFlow<Boolean> get() = _isAiLoading
+
+    private val _aiError = MutableStateFlow<String?>(null)
+    val aiError: StateFlow<String?> get() = _aiError
+
     // WebView reference for screenshot export
     var webViewRef: WeakReference<WebView>? = null
 
@@ -112,27 +129,29 @@ class EditorViewModel @Inject constructor(
     }
 
     fun saveFile() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val path = currentFilePath
-            if (path != null) {
-                val file = File(path)
-                file.parentFile?.mkdirs()
-                file.writeText(_markdownText.value)
+        viewModelScope.launch {
+            withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                val path = currentFilePath
+                if (path != null) {
+                    val file = File(path)
+                    file.parentFile?.mkdirs()
+                    file.writeText(_markdownText.value)
 
-                val myDocsPath = myDocsDir.absolutePath
-                val isInMyDocsDirectly = path.startsWith(myDocsPath) &&
-                    path.removePrefix(myDocsPath).trim('/').let { rel ->
-                        !rel.contains('/') && rel.endsWith(".md", ignoreCase = true)
-                    }
-
-                if (!isInMyDocsDirectly) {
-                    val myDocsFile = File(myDocsDir, file.name)
-                    if (myDocsFile.absolutePath != path) {
-                        myDocsFile.writeText(_markdownText.value)
-                        if (path.startsWith(myDocsPath) && file.isFile) {
-                            file.delete()
+                    val myDocsPath = myDocsDir.absolutePath
+                    val isInMyDocsDirectly = path.startsWith(myDocsPath) &&
+                        path.removePrefix(myDocsPath).trim('/').let { rel ->
+                            !rel.contains('/') && rel.endsWith(".md", ignoreCase = true)
                         }
-                        currentFilePath = myDocsFile.absolutePath
+
+                    if (!isInMyDocsDirectly) {
+                        val myDocsFile = File(myDocsDir, file.name)
+                        if (myDocsFile.absolutePath != path) {
+                            myDocsFile.writeText(_markdownText.value)
+                            if (path.startsWith(myDocsPath) && file.isFile) {
+                                file.delete()
+                            }
+                            currentFilePath = myDocsFile.absolutePath
+                        }
                     }
                 }
             }
@@ -180,7 +199,7 @@ class EditorViewModel @Inject constructor(
     fun insertBold() {
         val wv = webViewRef?.get()
         if (wv != null) {
-            wv.evaluateJavascript("document.execCommand('bold');", null)
+            wv.evalJs(wrapOrUnwrapTagJs("strong"))
             return
         }
         insertMarkdown("**", "**")
@@ -189,7 +208,7 @@ class EditorViewModel @Inject constructor(
     fun insertItalic() {
         val wv = webViewRef?.get()
         if (wv != null) {
-            wv.evaluateJavascript("document.execCommand('italic');", null)
+            wv.evalJs(wrapOrUnwrapTagJs("em"))
             return
         }
         insertMarkdown("*", "*")
@@ -200,9 +219,8 @@ class EditorViewModel @Inject constructor(
         if (wv != null) {
             val ep = jsEsc(prefix)
             val es = jsEsc(suffix)
-            wv.evaluateJavascript(
-                "(function(){var p='$ep',s='$es',sel=window.getSelection();if(sel.rangeCount>0){var r=sel.getRangeAt(0),t=r.toString()||'',n=document.createTextNode(p+t+s);r.deleteContents();r.insertNode(n);r.selectNodeContents(n);sel.removeAllRanges();sel.addRange(r);}})()",
-                null
+            wv.evalJs(
+                "(function(){var p='$ep',s='$es',sel=window.getSelection();if(sel.rangeCount>0){var r=sel.getRangeAt(0),t=r.toString()||'',n=document.createTextNode(p+t+s);r.deleteContents();r.insertNode(n);r.selectNodeContents(n);sel.removeAllRanges();sel.addRange(r);}})()"
             )
             return
         }
@@ -230,10 +248,25 @@ class EditorViewModel @Inject constructor(
     fun insertHeading(level: Int) {
         val wv = webViewRef?.get()
         if (wv != null) {
-            wv.evaluateJavascript(
-                "document.execCommand('formatBlock',false,'<h$level>');",
-                null
-            )
+            wv.evalJs("""(function(){
+document.body.focus();
+var s=window.getSelection();
+if(!s.rangeCount)return;
+var n=s.getRangeAt(0).startContainer;
+while(n&&n.nodeType!==1)n=n.parentElement;
+var bl=null,t=n;
+while(t&&t!==document.body){if(/^(P|DIV|H[1-6]|LI|BLOCKQUOTE|PRE|TD|TH)$/.test(t.nodeName)){bl=t;break;}t=t.parentElement;}
+if(!bl)return;
+var tag='H$level';
+if(bl.nodeName===tag)return;
+var nh=document.createElement(tag);
+while(bl.firstChild)nh.appendChild(bl.firstChild);
+bl.parentNode.replaceChild(nh,bl);
+var nr=document.createRange();
+nr.selectNodeContents(nh);
+s.removeAllRanges();
+s.addRange(nr);
+})()""")
             return
         }
         val text = _markdownText.value
@@ -252,9 +285,8 @@ class EditorViewModel @Inject constructor(
     fun insertCodeBlock(language: String = "") {
         val wv = webViewRef?.get()
         if (wv != null) {
-            wv.evaluateJavascript(
-                """(function(){var pre=document.createElement('pre'),code=document.createElement('code');code.textContent='​';pre.appendChild(code);var sel=window.getSelection();if(sel.rangeCount>0){var r=sel.getRangeAt(0);if(r.collapsed){r.insertNode(pre)}else{r.deleteContents();r.insertNode(pre)}r.setStartAfter(code);r.collapse(true);sel.removeAllRanges();sel.addRange(r)}else{document.body.appendChild(pre)}})()""",
-                null
+            wv.evalJs(
+                """(function(){var pre=document.createElement('pre'),code=document.createElement('code');code.textContent='​';pre.appendChild(code);var sel=window.getSelection();if(sel.rangeCount>0){var r=sel.getRangeAt(0);if(r.collapsed){r.insertNode(pre)}else{r.deleteContents();r.insertNode(pre)}r.setStartAfter(code);r.collapse(true);sel.removeAllRanges();sel.addRange(r)}else{document.body.appendChild(pre)}})()"""
             )
             return
         }
@@ -282,9 +314,8 @@ class EditorViewModel @Inject constructor(
                 }
                 append("</tbody></table>")
             }.replace("\"", "\\\"")
-            wv.evaluateJavascript(
-                """(function(){var tbl=document.createElement('div');tbl.innerHTML='$tableHtml';var sel=window.getSelection();if(sel.rangeCount>0){var r=sel.getRangeAt(0);r.insertNode(tbl)}else{document.body.appendChild(tbl)}})()""",
-                null
+            wv.evalJs(
+                """(function(){var tbl=document.createElement('div');tbl.innerHTML='$tableHtml';var sel=window.getSelection();if(sel.rangeCount>0){var r=sel.getRangeAt(0);r.insertNode(tbl)}else{document.body.appendChild(tbl)}})()"""
             )
             return
         }
@@ -314,9 +345,8 @@ class EditorViewModel @Inject constructor(
     fun insertMathBlock() {
         val wv = webViewRef?.get()
         if (wv != null) {
-            wv.evaluateJavascript(
-                """(function(){var pre=document.createElement('pre'),code=document.createElement('code');code.textContent='$$​$$';pre.appendChild(code);var sel=window.getSelection();if(sel.rangeCount>0){var r=sel.getRangeAt(0);r.insertNode(pre)}else{document.body.appendChild(pre)}})()""",
-                null
+            wv.evalJs(
+                """(function(){var pre=document.createElement('pre'),code=document.createElement('code');code.textContent='$$​$$';pre.appendChild(code);var sel=window.getSelection();if(sel.rangeCount>0){var r=sel.getRangeAt(0);r.insertNode(pre)}else{document.body.appendChild(pre)}})()"""
             )
             return
         }
@@ -333,9 +363,8 @@ class EditorViewModel @Inject constructor(
     fun insertQuote() {
         val wv = webViewRef?.get()
         if (wv != null) {
-            wv.evaluateJavascript(
-                "(function(){var sel=window.getSelection();if(!sel.rangeCount)return;var r=sel.getRangeAt(0),bq=document.createElement('blockquote');if(r.collapsed){var p=document.createElement('p');p.appendChild(document.createElement('br'));bq.appendChild(p);r.insertNode(bq)}else{bq.appendChild(r.extractContents());r.insertNode(bq)}})()",
-                null
+            wv.evalJs(
+                "(function(){var sel=window.getSelection();if(!sel.rangeCount)return;var r=sel.getRangeAt(0),bq=document.createElement('blockquote');if(r.collapsed){var p=document.createElement('p');p.appendChild(document.createElement('br'));bq.appendChild(p);r.insertNode(bq)}else{bq.appendChild(r.extractContents());r.insertNode(bq)}})()"
             )
             return
         }
@@ -345,7 +374,21 @@ class EditorViewModel @Inject constructor(
     fun insertUnorderedList() {
         val wv = webViewRef?.get()
         if (wv != null) {
-            wv.evaluateJavascript("document.execCommand('insertUnorderedList');", null)
+            wv.evalJs("""(function(){
+document.body.focus();
+var s=window.getSelection();
+if(!s.rangeCount)return;
+var r=s.getRangeAt(0);
+var sel=r.collapsed?null:r.extractContents();
+var ul=document.createElement('ul'),li=document.createElement('li');
+if(sel&&sel.textContent.trim()){li.appendChild(sel)}else{li.innerHTML='&nbsp;'}
+ul.appendChild(li);
+r.insertNode(ul);
+r.setStartAfter(li.firstChild||li);
+r.collapse(true);
+s.removeAllRanges();
+s.addRange(r);
+})()""")
             return
         }
         insertMarkdown("- ", "")
@@ -354,7 +397,21 @@ class EditorViewModel @Inject constructor(
     fun insertOrderedList() {
         val wv = webViewRef?.get()
         if (wv != null) {
-            wv.evaluateJavascript("document.execCommand('insertOrderedList');", null)
+            wv.evalJs("""(function(){
+document.body.focus();
+var s=window.getSelection();
+if(!s.rangeCount)return;
+var r=s.getRangeAt(0);
+var sel=r.collapsed?null:r.extractContents();
+var ol=document.createElement('ol'),li=document.createElement('li');
+if(sel&&sel.textContent.trim()){li.appendChild(sel)}else{li.innerHTML='&nbsp;'}
+ol.appendChild(li);
+r.insertNode(ol);
+r.setStartAfter(li.firstChild||li);
+r.collapse(true);
+s.removeAllRanges();
+s.addRange(r);
+})()""")
             return
         }
         insertMarkdown("1. ", "")
@@ -363,6 +420,7 @@ class EditorViewModel @Inject constructor(
     fun insertLink() {
         val wv = webViewRef?.get()
         if (wv != null) {
+            wv.requestFocus()
             wv.evaluateJavascript(
                 "(function(){var s=window.getSelection();return (s&&s.rangeCount>0)?s.getRangeAt(0).toString():'';})()",
                 { result ->
@@ -391,7 +449,7 @@ class EditorViewModel @Inject constructor(
         val wv = webViewRef?.get()
         if (wv != null) {
             val safeUrl = jsEsc(url.ifBlank { "https://" })
-            wv.evaluateJavascript(
+            wv.evalJs(
                 "(function(){" +
                 "var sel=window.getSelection();" +
                 "if(!sel.rangeCount)return;" +
@@ -401,8 +459,7 @@ class EditorViewModel @Inject constructor(
                 "a.href='$safeUrl';a.textContent=txt;" +
                 "if(r.collapsed){a.textContent='$safeUrl';r.insertNode(a);r.setStartAfter(a);r.collapse(true);sel.removeAllRanges();sel.addRange(r)}" +
                 "else{r.deleteContents();r.insertNode(a);r.setStartAfter(a);r.collapse(true);sel.removeAllRanges();sel.addRange(r)}" +
-                "})()",
-                null
+                "})()"
             )
             return
         }
@@ -436,7 +493,18 @@ class EditorViewModel @Inject constructor(
     fun insertHorizontalRule() {
         val wv = webViewRef?.get()
         if (wv != null) {
-            wv.evaluateJavascript("document.execCommand('insertHorizontalRule');", null)
+            wv.evalJs("""(function(){
+document.body.focus();
+var s=window.getSelection();
+if(!s.rangeCount)return;
+var r=s.getRangeAt(0);
+var hr=document.createElement('hr');
+r.insertNode(hr);
+r.setStartAfter(hr);
+r.collapse(true);
+s.removeAllRanges();
+s.addRange(r);
+})()""")
             return
         }
         val text = _markdownText.value
@@ -480,11 +548,10 @@ class EditorViewModel @Inject constructor(
                     )
                     val wv = webViewRef?.get()
                     if (wv != null) {
-                        // RICH mode: insert via JavaScript at cursor
+                        // RICH mode: insert via JavaScript at cursor, with breaks for separation
                         val src = contentUri.toString().replace("'", "\\'")
-                        wv.evaluateJavascript(
-                            "(function(){var img=document.createElement('img');img.src='$src';img.alt='图片';var sel=window.getSelection();if(sel.rangeCount>0){var r=sel.getRangeAt(0);r.insertNode(img);r.setStartAfter(img);r.collapse(true);sel.removeAllRanges();sel.addRange(r)}else{document.body.appendChild(img)}})()",
-                            null
+                        wv.evalJs(
+                            "(function(){var img=document.createElement('img'),br1=document.createElement('br'),br2=document.createElement('br');img.src='$src';img.alt='图片';var sel=window.getSelection();if(sel.rangeCount>0){var r=sel.getRangeAt(0);r.insertNode(br2);r.insertNode(img);r.insertNode(br1);r.setStartAfter(br2);r.collapse(true);sel.removeAllRanges();sel.addRange(r)}else{document.body.appendChild(br1);document.body.appendChild(img);document.body.appendChild(br2)}img.scrollIntoView({behavior:'smooth',block:'nearest'})})()"
                         )
                     } else {
                         // SOURCE mode: insert markdown text
@@ -520,7 +587,7 @@ class EditorViewModel @Inject constructor(
     fun insertStrikethrough() {
         val wv = webViewRef?.get()
         if (wv != null) {
-            wv.evaluateJavascript("document.execCommand('strikeThrough');", null)
+            wv.evalJs(wrapOrUnwrapTagJs("del"))
             return
         }
         insertMarkdown("~~", "~~")
@@ -529,9 +596,8 @@ class EditorViewModel @Inject constructor(
     fun insertTaskList() {
         val wv = webViewRef?.get()
         if (wv != null) {
-            wv.evaluateJavascript(
-                "(function(){var ul=document.createElement('ul');var li=document.createElement('li');li.className='task-list-item';var cb=document.createElement('input');cb.type='checkbox';li.appendChild(cb);li.appendChild(document.createTextNode(' 任务'));ul.appendChild(li);var sel=window.getSelection();if(sel.rangeCount>0){var r=sel.getRangeAt(0);r.insertNode(ul)}else{document.body.appendChild(ul)}})()",
-                null
+            wv.evalJs(
+                "(function(){var ul=document.createElement('ul');var li=document.createElement('li');li.className='task-list-item';var cb=document.createElement('input');cb.type='checkbox';li.appendChild(cb);li.appendChild(document.createTextNode(' 任务'));ul.appendChild(li);var sel=window.getSelection();if(sel.rangeCount>0){var r=sel.getRangeAt(0);r.insertNode(ul)}else{document.body.appendChild(ul)}})()"
             )
             return
         }
@@ -541,9 +607,8 @@ class EditorViewModel @Inject constructor(
     fun insertTableRow() {
         val wv = webViewRef?.get()
         if (wv != null) {
-            wv.evaluateJavascript(
-                "(function(){var sel=window.getSelection();if(!sel.rangeCount)return;var n=sel.getRangeAt(0).startContainer;while(n&&n.nodeName!=='TR'&&n.nodeName!=='BODY')n=n.parentElement;if(!n||n.nodeName!=='TR')return;var cs=n.querySelectorAll('td,th');var nr=document.createElement('tr');for(var i=0;i<cs.length;i++){var c=document.createElement(cs[i].nodeName.toLowerCase());c.innerHTML='&nbsp;';nr.appendChild(c)}n.parentNode.insertBefore(nr,n.nextSibling)})()",
-                null
+            wv.evalJs(
+                "(function(){var sel=window.getSelection();if(!sel.rangeCount)return;var n=sel.getRangeAt(0).startContainer;while(n&&n.nodeName!=='TR'&&n.nodeName!=='BODY')n=n.parentElement;if(!n||n.nodeName!=='TR')return;var cs=n.querySelectorAll('td,th');var nr=document.createElement('tr');for(var i=0;i<cs.length;i++){var c=document.createElement(cs[i].nodeName.toLowerCase());c.innerHTML='&nbsp;';nr.appendChild(c)}n.parentNode.insertBefore(nr,n.nextSibling)})()"
             )
             return
         }
@@ -561,9 +626,8 @@ class EditorViewModel @Inject constructor(
     fun insertTableColumn() {
         val wv = webViewRef?.get()
         if (wv != null) {
-            wv.evaluateJavascript(
-                "(function(){var sel=window.getSelection();if(!sel.rangeCount)return;var n=sel.getRangeAt(0).startContainer;while(n&&n.nodeName!=='TD'&&n.nodeName!=='TH'&&n.nodeName!=='BODY')n=n.parentElement;if(!n||n.nodeName!=='TD'&&n.nodeName!=='TH')return;var ci=Array.prototype.indexOf.call(n.parentElement.children,n);var tbl=n;while(tbl&&tbl.nodeName!=='TABLE')tbl=tbl.parentElement;if(!tbl)return;var rows=tbl.querySelectorAll('tr');for(var i=0;i<rows.length;i++){var cs=rows[i].querySelectorAll('td,th');if(cs.length<=ci)continue;var nc=document.createElement(cs[0].nodeName.toLowerCase());nc.innerHTML='&nbsp;';if(cs[ci])cs[ci].parentElement.insertBefore(nc,cs[ci].nextSibling)}})()",
-                null
+            wv.evalJs(
+                "(function(){var sel=window.getSelection();if(!sel.rangeCount)return;var n=sel.getRangeAt(0).startContainer;while(n&&n.nodeName!=='TD'&&n.nodeName!=='TH'&&n.nodeName!=='BODY')n=n.parentElement;if(!n||n.nodeName!=='TD'&&n.nodeName!=='TH')return;var ci=Array.prototype.indexOf.call(n.parentElement.children,n);var tbl=n;while(tbl&&tbl.nodeName!=='TABLE')tbl=tbl.parentElement;if(!tbl)return;var rows=tbl.querySelectorAll('tr');for(var i=0;i<rows.length;i++){var cs=rows[i].querySelectorAll('td,th');if(cs.length<=ci)continue;var nc=document.createElement(cs[0].nodeName.toLowerCase());nc.innerHTML='&nbsp;';if(cs[ci])cs[ci].parentElement.insertBefore(nc,cs[ci].nextSibling)}})()"
             )
             return
         }
@@ -580,9 +644,8 @@ class EditorViewModel @Inject constructor(
     fun deleteTableRow() {
         val wv = webViewRef?.get()
         if (wv != null) {
-            wv.evaluateJavascript(
-                "(function(){var sel=window.getSelection();if(!sel.rangeCount)return;var n=sel.getRangeAt(0).startContainer;while(n&&n.nodeName!=='TR'&&n.nodeName!=='TBODY'&&n.nodeName!=='THEAD'&&n.nodeName!=='TABLE'&&n.nodeName!=='BODY')n=n.parentElement;if(!n||n.nodeName!=='TR')return;var tbl=n.parentElement;n.parentElement.removeChild(n);if(tbl&&tbl.nodeName==='TBODY'&&!tbl.querySelector('tr')){tbl.removeChild(tbl.querySelector('tr')||tbl);}})()",
-                null
+            wv.evalJs(
+                "(function(){var sel=window.getSelection();if(!sel.rangeCount)return;var n=sel.getRangeAt(0).startContainer;while(n&&n.nodeName!=='TR'&&n.nodeName!=='TBODY'&&n.nodeName!=='THEAD'&&n.nodeName!=='TABLE'&&n.nodeName!=='BODY')n=n.parentElement;if(!n||n.nodeName!=='TR')return;var tbl=n.parentElement;n.parentElement.removeChild(n);if(tbl&&tbl.nodeName==='TBODY'&&!tbl.querySelector('tr')){tbl.removeChild(tbl.querySelector('tr')||tbl);}})()"
             )
             return
         }
@@ -591,15 +654,47 @@ class EditorViewModel @Inject constructor(
     fun deleteTableColumn() {
         val wv = webViewRef?.get()
         if (wv != null) {
-            wv.evaluateJavascript(
-                "(function(){var sel=window.getSelection();if(!sel.rangeCount)return;var n=sel.getRangeAt(0).startContainer;while(n&&n.nodeName!=='TD'&&n.nodeName!=='TH'&&n.nodeName!=='BODY')n=n.parentElement;if(!n||(n.nodeName!=='TD'&&n.nodeName!=='TH'))return;var ci=Array.prototype.indexOf.call(n.parentElement.children,n);var tbl=n;while(tbl&&tbl.nodeName!=='TABLE')tbl=tbl.parentElement;if(!tbl)return;var rows=tbl.querySelectorAll('tr');for(var i=0;i<rows.length;i++){var cs=rows[i].querySelectorAll('td,th');if(cs.length>ci)cs[ci].parentElement.removeChild(cs[ci])}})()",
-                null
+            wv.evalJs(
+                "(function(){var sel=window.getSelection();if(!sel.rangeCount)return;var n=sel.getRangeAt(0).startContainer;while(n&&n.nodeName!=='TD'&&n.nodeName!=='TH'&&n.nodeName!=='BODY')n=n.parentElement;if(!n||(n.nodeName!=='TD'&&n.nodeName!=='TH'))return;var ci=Array.prototype.indexOf.call(n.parentElement.children,n);var tbl=n;while(tbl&&tbl.nodeName!=='TABLE')tbl=tbl.parentElement;if(!tbl)return;var rows=tbl.querySelectorAll('tr');for(var i=0;i<rows.length;i++){var cs=rows[i].querySelectorAll('td,th');if(cs.length>ci)cs[ci].parentElement.removeChild(cs[ci])}})()"
             )
             return
         }
     }
 
     private fun jsEsc(s: String): String = s.replace("\"", "\\\"").replace("'", "\\'")
+
+    // 直接 DOM 操作替代已废弃的 document.execCommand
+    private fun wrapOrUnwrapTagJs(tagName: String): String {
+        return """(function(){
+document.body.focus();
+var s=window.getSelection();
+if(!s.rangeCount)return;
+var r=s.getRangeAt(0);
+if(r.collapsed)return;
+var e=r.commonAncestorContainer;
+while(e&&e.nodeType!==1)e=e.parentElement;
+var w=e?e.closest('$tagName'):null;
+if(w){
+  var f=document.createDocumentFragment(),c;
+  while(c=w.firstChild)f.appendChild(c);
+  w.parentNode.replaceChild(f,w);
+  r.selectNodeContents(f);
+}else{
+  var n=document.createElement('$tagName');
+  n.appendChild(r.extractContents());
+  r.insertNode(n);
+  r.selectNodeContents(n);
+}
+s.removeAllRanges();
+s.addRange(r);
+})()"""
+    }
+
+    // 所有 evaluateJavascript 调用前先确保 WebView 拥有焦点
+    private fun WebView.evalJs(script: String) {
+        requestFocus()
+        evaluateJavascript(script, null)
+    }
 
     fun showExportDialog() {
         _showExportDialog.value = true
@@ -774,6 +869,125 @@ class EditorViewModel @Inject constructor(
                 pushUndo(text)
                 _markdownText.value = text.substring(0, currentLineStart) + newLine + text.substring(currentLineEnd)
                 _cursorPosition = currentLineStart + newLine.length
+            }
+        }
+    }
+
+    // ========== AI 写作助手 ==========
+
+    private var aiSelectionStart = 0
+    private var aiSelectionEnd = 0
+    private var aiJob: Job? = null
+
+    fun setAiPrompt(prompt: String) {
+        _aiPrompt.value = prompt
+    }
+
+    fun clearAiError() {
+        _aiError.value = null
+    }
+
+    /** 停止正在执行的 AI 任务 */
+    fun cancelAiTask() {
+        aiJob?.cancel()
+        aiJob = null
+        _isAiLoading.value = false
+        _aiError.value = "已取消"
+    }
+
+    /**
+     * 发送用户输入给 AI，根据返回的 AiResultType 处理内容。
+     * 使用 NonCancellable 确保退出页面时 AI 任务继续在后台执行。
+     */
+    fun sendAiPrompt() {
+        val prompt = _aiPrompt.value.trim()
+        if (prompt.isBlank()) return
+
+        // 取消之前的任务
+        aiJob?.cancel()
+
+        aiJob = viewModelScope.launch {
+            _isAiLoading.value = true
+            _aiError.value = null
+
+            try {
+                val apiKey = apiKeyRepository.getApiKey()
+                if (apiKey.isBlank()) {
+                    _aiError.value = "请先在设置页面配置 DeepSeek API Key"
+                    _isAiLoading.value = false
+                    return@launch
+                }
+
+                val fullText = _markdownText.value
+
+                val selStart = minOf(_selectionStart, _selectionEnd).coerceIn(0, fullText.length)
+                val selEnd = maxOf(_selectionStart, _selectionEnd).coerceIn(0, fullText.length)
+                val selectedText = if (selStart != selEnd) fullText.substring(selStart, selEnd) else null
+                aiSelectionStart = selStart
+                aiSelectionEnd = selEnd
+
+                // NonCancellable：即使退出页面，网络请求也不中断
+                val result = withContext(Dispatchers.IO + NonCancellable) {
+                    aiService.generateMarkdown(
+                        apiKey = apiKey,
+                        userPrompt = prompt,
+                        contextMarkdown = fullText.ifBlank { null },
+                        selectedText = selectedText
+                    )
+                }
+
+                result.fold(
+                    onSuccess = { aiResult ->
+                        applyAiResult(aiResult)
+                        _aiPrompt.value = ""
+                    },
+                    onFailure = { error ->
+                        _aiError.value = error.message ?: "AI 请求失败"
+                    }
+                )
+            } catch (e: CancellationException) {
+                // 用户主动取消，不做额外处理
+            } catch (e: Exception) {
+                _aiError.value = "发生错误: ${e.message}"
+            } finally {
+                _isAiLoading.value = false
+                aiJob = null
+            }
+        }
+    }
+
+    private fun applyAiResult(result: com.markdowneditor.network.AiResult) {
+        val text = _markdownText.value
+
+        when (result.type) {
+            com.markdowneditor.network.AiResultType.FULL_DOCUMENT -> {
+                // 全文修改：替换整个文档
+                pushUndo(text)
+                _markdownText.value = result.text
+                _cursorPosition = result.text.length
+                aiSelectionStart = 0
+                aiSelectionEnd = 0
+            }
+
+            com.markdowneditor.network.AiResultType.REPLACE_SELECTION -> {
+                // 选中修改：替换选中文本
+                val before = text.substring(0, aiSelectionStart)
+                val after = text.substring(aiSelectionEnd)
+                pushUndo(text)
+                _markdownText.value = before + result.text + after
+                _cursorPosition = aiSelectionStart + result.text.length
+            }
+
+            com.markdowneditor.network.AiResultType.NEW_CONTENT -> {
+                // 新建：插入光标处
+                val pos = minOf(_cursorPosition, text.length)
+                val prefix = if (pos > 0 && text[pos - 1] != '\n') "\n\n" else "\n"
+                val suffix = "\n\n"
+                val before = text.substring(0, pos)
+                val after = text.substring(pos)
+                pushUndo(text)
+                _markdownText.value = before + prefix + result.text + suffix + after
+                _cursorPosition = pos + prefix.length + result.text.length + suffix.length
             }
         }
     }

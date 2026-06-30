@@ -56,6 +56,11 @@ fun EditorScreen(
     val showShareDialog by viewModel.showShareDialog.collectAsState()
     val showLinkDialog by viewModel.showLinkDialog.collectAsState()
 
+    // AI 聊天状态
+    val aiPrompt by viewModel.aiPrompt.collectAsState()
+    val isAiLoading by viewModel.isAiLoading.collectAsState()
+    val aiError by viewModel.aiError.collectAsState()
+
     var viewMode by remember { mutableStateOf(if (isTablet) EditorViewMode.SPLIT else EditorViewMode.RICH) }
     var showSaveToast by remember { mutableStateOf(false) }
     var showHelpDialog by remember { mutableStateOf(false) }
@@ -192,7 +197,6 @@ fun EditorScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .imePadding()
         ) {
             // Status bar colored strip
             val density = LocalDensity.current
@@ -335,9 +339,10 @@ fun EditorScreen(
                 }
             }
 
+            // 编辑器内容区 — weight(1f) 自动填充 TopBar 和 AiChatBar 之间的空间
             Column(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .fillMaxWidth()
                     .weight(1f)
             ) {
                 AnimatedContent(
@@ -356,7 +361,9 @@ fun EditorScreen(
                     },
                     contentKey = { it }
                 ) { mode ->
-                    Column(modifier = Modifier.fillMaxSize()) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().weight(1f, fill = true)
+                    ) {
                         if (mode == EditorViewMode.RICH || mode == EditorViewMode.SOURCE || mode == EditorViewMode.SPLIT) {
                             FormattingToolbar(
                                 viewModel = viewModel,
@@ -373,6 +380,19 @@ fun EditorScreen(
                                     onCursorPositionChange = { viewModel.setCursorPosition(it) },
                                     onSelectionChange = { start, end -> viewModel.setSelection(start, end) },
                                     onWebViewReady = { webView -> viewModel.webViewRef = java.lang.ref.WeakReference(webView) },
+                                    onShortcut = { action ->
+                                        when (action) {
+                                            "save" -> { viewModel.saveFile(); showSaveToast = true }
+                                            "undo" -> viewModel.undo()
+                                            "insertLink" -> viewModel.insertLink()
+                                            "insertImage" -> viewModel.insertImage()
+                                            "insertTable" -> viewModel.insertTable()
+                                            "mathBlock" -> viewModel.insertMathBlock()
+                                            "newLine" -> viewModel.insertNewLine()
+                                            "decreaseHeading" -> viewModel.decreaseHeadingLevel()
+                                            "increaseHeading" -> viewModel.increaseHeadingLevel()
+                                        }
+                                    },
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .weight(1f)
@@ -422,6 +442,19 @@ fun EditorScreen(
                     }
                 }
             }
+
+            // AI 聊天输入栏 — 在编辑器内容下方，跟随键盘
+            AiChatBar(
+                prompt = aiPrompt,
+                onPromptChange = { viewModel.setAiPrompt(it) },
+                onSend = {
+                    if (isAiLoading) viewModel.cancelAiTask()
+                    else viewModel.sendAiPrompt()
+                },
+                isLoading = isAiLoading,
+                error = aiError,
+                onDismissError = { viewModel.clearAiError() }
+            )
         }
 
         if (showSaveToast) {
@@ -793,6 +826,150 @@ private fun HelpSection(title: String, items: List<String>) {
                 style = AppTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+    }
+}
+
+@Composable
+private fun AiChatBar(
+    prompt: String,
+    onPromptChange: (String) -> Unit,
+    onSend: () -> Unit,
+    isLoading: Boolean,
+    error: String?,
+    onDismissError: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        // 错误提示
+        if (error != null) {
+            Surface(
+                color = MaterialTheme.colorScheme.errorContainer,
+                shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = AppTheme.spacing.md, vertical = AppTheme.spacing.sm),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.ErrorOutline,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(AppTheme.spacing.sm))
+                    Text(
+                        error,
+                        style = AppTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = onDismissError,
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "关闭",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // 聊天输入栏 — adjustNothing + imePadding 自行控制位置
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f),
+            shadowElevation = 8.dp,
+            shape = RoundedCornerShape(
+                topStart = if (error == null) 16.dp else 0.dp,
+                topEnd = if (error == null) 16.dp else 0.dp
+            ),
+            modifier = Modifier.imePadding()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = AppTheme.spacing.md, vertical = AppTheme.spacing.sm),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(AppTheme.spacing.sm)
+            ) {
+                // AI 图标
+                Icon(
+                    Icons.Default.AutoAwesome,
+                    contentDescription = null,
+                    tint = if (isLoading) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+
+                // 输入框
+                OutlinedTextField(
+                    value = prompt,
+                    onValueChange = onPromptChange,
+                    placeholder = {
+                        Text(
+                            "告诉 AI 你想写什么...",
+                            style = AppTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                        )
+                    },
+                    enabled = !isLoading,
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(20.dp),
+                    textStyle = AppTheme.typography.bodyMedium.copy(
+                        color = MaterialTheme.colorScheme.onSurface
+                    ),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        focusedContainerColor = MaterialTheme.colorScheme.surface,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    )
+                )
+
+                // 发送按钮 / 旋转停止按钮
+                if (isLoading) {
+                    IconButton(
+                        onClick = onSend,
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(28.dp),
+                                strokeWidth = 2.5.dp,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            Icon(
+                                Icons.Default.Stop,
+                                contentDescription = "停止生成",
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                } else {
+                    IconButton(
+                        onClick = onSend,
+                        enabled = prompt.isNotBlank(),
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Send,
+                            contentDescription = "发送",
+                            tint = if (prompt.isNotBlank()) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                        )
+                    }
+                }
+            }
         }
     }
 }

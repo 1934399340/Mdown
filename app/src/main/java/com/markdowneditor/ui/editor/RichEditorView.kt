@@ -23,6 +23,7 @@ fun RichEditorView(
     onCursorPositionChange: (Int) -> Unit,
     onSelectionChange: (Int, Int) -> Unit,
     onWebViewReady: ((WebView) -> Unit)? = null,
+    onShortcut: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -144,6 +145,7 @@ hr {
 }
 
 img {
+    display: block;
     max-width: 100%;
     max-height: 480px;
     object-fit: contain;
@@ -180,38 +182,238 @@ var observer = new MutationObserver(function() {
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(function() {
         MdownBridge.onContentChanged(document.body.innerHTML);
-    }, 80);
+    }, 250);
 });
 observer.observe(document.body, { childList: true, subtree: true, characterData: true });
 
-function insertImageAtCursor(src, alt) {
-    var img = document.createElement('img');
-    img.src = src;
-    img.alt = alt || '';
-    img.setAttribute('data-mdown-image', '1');
-    var sel = window.getSelection();
-    if (sel.rangeCount > 0) {
-        var range = sel.getRangeAt(0);
-        range.insertNode(img);
-        range.setStartAfter(img);
-        range.collapse(true);
-        sel.removeAllRanges();
-        sel.addRange(range);
+var selectionTimer = null;
+document.addEventListener('selectionchange', function() {
+    clearTimeout(selectionTimer);
+    selectionTimer = setTimeout(function() {
+        var sel = window.getSelection();
+        if (sel && sel.rangeCount > 0) {
+            MdownBridge.onSelectionChanged(
+                sel.anchorOffset,
+                sel.focusOffset
+            );
+        }
+    }, 400);
+});
+
+// DOM 操作辅助函数（替代已废弃的 document.execCommand）
+function MdownWrapTag(tag) {
+    document.body.focus();
+    var s = window.getSelection();
+    if (!s.rangeCount) return;
+    var r = s.getRangeAt(0);
+    if (r.collapsed) return;
+    var e = r.commonAncestorContainer;
+    while (e && e.nodeType !== 1) e = e.parentElement;
+    var w = e ? e.closest(tag) : null;
+    if (w) {
+        var f = document.createDocumentFragment(), c;
+        while (c = w.firstChild) f.appendChild(c);
+        w.parentNode.replaceChild(f, w);
+        r.selectNodeContents(f);
     } else {
-        document.body.appendChild(img);
+        var n = document.createElement(tag);
+        n.appendChild(r.extractContents());
+        r.insertNode(n);
+        r.selectNodeContents(n);
     }
-    clearTimeout(debounceTimer);
-    MdownBridge.onContentChanged(document.body.innerHTML);
+    s.removeAllRanges();
+    s.addRange(r);
 }
 
-document.addEventListener('selectionchange', function() {
-    var sel = window.getSelection();
-    if (sel && sel.rangeCount > 0) {
-        MdownBridge.onSelectionChanged(
-            sel.anchorOffset,
-            sel.focusOffset
-        );
+function MdownHeading(level) {
+    document.body.focus();
+    var s = window.getSelection();
+    if (!s.rangeCount) return;
+    var n = s.getRangeAt(0).startContainer;
+    while (n && n.nodeType !== 1) n = n.parentElement;
+    var bl = null, t = n;
+    while (t && t !== document.body) {
+        if (/^(P|DIV|H[1-6]|LI|BLOCKQUOTE|PRE|TD|TH)$/.test(t.nodeName)) { bl = t; break; }
+        t = t.parentElement;
     }
+    if (!bl) return;
+    var tag = 'H' + level;
+    if (bl.nodeName === tag) return;
+    var nh = document.createElement(tag);
+    while (bl.firstChild) nh.appendChild(bl.firstChild);
+    bl.parentNode.replaceChild(nh, bl);
+    var nr = document.createRange();
+    nr.selectNodeContents(nh);
+    s.removeAllRanges();
+    s.addRange(nr);
+}
+
+function MdownInsertList(type) {
+    document.body.focus();
+    var s = window.getSelection();
+    if (!s.rangeCount) return;
+    var r = s.getRangeAt(0);
+    var sel = r.collapsed ? null : r.extractContents();
+    var list = document.createElement(type);
+    var li = document.createElement('li');
+    if (sel && sel.textContent.trim()) { li.appendChild(sel); }
+    else { li.innerHTML = '&nbsp;'; }
+    list.appendChild(li);
+    r.insertNode(list);
+    r.setStartAfter(li.firstChild || li);
+    r.collapse(true);
+    s.removeAllRanges();
+    s.addRange(r);
+}
+
+function MdownInsertQuote() {
+    document.body.focus();
+    var sel = window.getSelection();
+    if (!sel.rangeCount) return;
+    var r = sel.getRangeAt(0), bq = document.createElement('blockquote');
+    if (r.collapsed) {
+        var p = document.createElement('p');
+        p.appendChild(document.createElement('br'));
+        bq.appendChild(p);
+        r.insertNode(bq);
+    } else {
+        bq.appendChild(r.extractContents());
+        r.insertNode(bq);
+    }
+}
+
+function MdownInsertHR() {
+    document.body.focus();
+    var s = window.getSelection();
+    if (!s.rangeCount) return;
+    var r = s.getRangeAt(0);
+    var hr = document.createElement('hr');
+    r.insertNode(hr);
+    r.setStartAfter(hr);
+    r.collapse(true);
+    s.removeAllRanges();
+    s.addRange(r);
+}
+
+function MdownInsertCodeBlock() {
+    document.body.focus();
+    var pre = document.createElement('pre');
+    var code = document.createElement('code');
+    code.textContent = '​';
+    pre.appendChild(code);
+    var sel = window.getSelection();
+    if (sel.rangeCount > 0) {
+        var r = sel.getRangeAt(0);
+        if (r.collapsed) { r.insertNode(pre); }
+        else { r.deleteContents(); r.insertNode(pre); }
+        r.setStartAfter(code);
+        r.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(r);
+    } else {
+        document.body.appendChild(pre);
+    }
+}
+
+// Tab 键在表格单元格间导航
+function MdownTabInTable(forward) {
+    var s = window.getSelection();
+    if (!s.rangeCount) return false;
+    var n = s.getRangeAt(0).startContainer;
+    while (n && n.nodeType !== 1) n = n.parentElement;
+    var cell = n ? n.closest('td,th') : null;
+    if (!cell) return false;
+    var row = cell.parentElement;
+    var cells = row.querySelectorAll('td,th');
+    var idx = Array.prototype.indexOf.call(cells, cell);
+    var target = null;
+    if (!forward) {
+        if (idx > 0) {
+            target = cells[idx - 1];
+        } else {
+            var prevRow = row.previousElementSibling;
+            if (prevRow && prevRow.nodeName === 'TR') {
+                var pc = prevRow.querySelectorAll('td,th');
+                if (pc.length) target = pc[pc.length - 1];
+            }
+        }
+    } else {
+        if (idx < cells.length - 1) {
+            target = cells[idx + 1];
+        } else {
+            var nextRow = row.nextElementSibling;
+            if (!nextRow || nextRow.nodeName !== 'TR') {
+                // 在末尾新建一行
+                var body = row.parentElement;
+                nextRow = document.createElement('tr');
+                for (var i = 0; i < cells.length; i++) {
+                    var nc = document.createElement(cells[i].nodeName.toLowerCase());
+                    nc.innerHTML = '&nbsp;';
+                    nextRow.appendChild(nc);
+                }
+                body.appendChild(nextRow);
+            }
+            var nc2 = nextRow.querySelectorAll('td,th');
+            if (nc2.length) target = nc2[0];
+        }
+    }
+    if (target) {
+        target.focus();
+        var r2 = document.createRange();
+        r2.selectNodeContents(target);
+        r2.collapse(true);
+        s.removeAllRanges();
+        s.addRange(r2);
+    }
+    return true;
+}
+
+// 键盘快捷键处理（在 WebView 内拦截，解决小米工作台模式按键路由问题）
+document.addEventListener('keydown', function(e) {
+    // Tab 键表格导航
+    if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey) {
+        if (MdownTabInTable(!e.shiftKey)) { e.preventDefault(); return; }
+        return;
+    }
+
+    if (!e.ctrlKey && !e.metaKey) return;
+    var handled = true;
+    if (e.shiftKey) {
+        switch (e.key) {
+            case 'K': case 'k': MdownInsertCodeBlock(); break;
+            case 'M': case 'm': MdownBridge.onShortcut('mathBlock'); break;
+            case 'I': case 'i': MdownBridge.onShortcut('insertImage'); break;
+            case 'U': case 'u': MdownWrapTag('del'); break;
+            default: handled = false;
+        }
+    } else {
+        switch (e.key) {
+            case 'B': case 'b': MdownWrapTag('strong'); break;
+            case 'I': case 'i': MdownWrapTag('em'); break;
+            case 'D': case 'd': MdownWrapTag('del'); break;
+            case 'U': case 'u': MdownWrapTag('u'); break;
+            case 'S': case 's': MdownBridge.onShortcut('save'); break;
+            case 'Z': case 'z': MdownBridge.onShortcut('undo'); break;
+            case 'K': case 'k': MdownBridge.onShortcut('insertLink'); break;
+            case 'L': case 'l': MdownInsertList('ul'); break;
+            case 'O': case 'o': MdownInsertList('ol'); break;
+            case 'Q': case 'q': MdownInsertQuote(); break;
+            case 'T': case 't': MdownBridge.onShortcut('insertTable'); break;
+            case 'H': case 'h': MdownInsertHR(); break;
+            case '/': MdownInsertCodeBlock(); break;
+            case 'Enter': MdownBridge.onShortcut('newLine'); break;
+            case '[': MdownBridge.onShortcut('decreaseHeading'); break;
+            case ']': MdownBridge.onShortcut('increaseHeading'); break;
+            case '1': MdownHeading(1); break;
+            case '2': MdownHeading(2); break;
+            case '3': MdownHeading(3); break;
+            case '4': MdownHeading(4); break;
+            case '5': MdownHeading(5); break;
+            case '6': MdownHeading(6); break;
+            default: handled = false;
+        }
+    }
+    if (handled) e.preventDefault();
 });
 </script>
 </html>
@@ -261,6 +463,13 @@ document.addEventListener('selectionchange', function() {
                             onCursorPositionChange(focusOffset)
                         }
                     }
+
+                    @JavascriptInterface
+                    fun onShortcut(action: String) {
+                        post {
+                            onShortcut?.invoke(action)
+                        }
+                    }
                 }, "MdownBridge")
 
                 webViewClient = object : WebViewClient() {
@@ -292,12 +501,17 @@ document.addEventListener('selectionchange', function() {
                     allowFileAccess = true
                     @Suppress("DEPRECATION")
                     allowUniversalAccessFromFileURLs = true
-                    domStorageEnabled = true
+                    domStorageEnabled = false
+                    databaseEnabled = false
                     loadWithOverviewMode = true
                     useWideViewPort = true
                     setSupportZoom(false)
                     blockNetworkImage = false
+                    mediaPlaybackRequiresUserGesture = true
                 }
+                setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+                isVerticalScrollBarEnabled = false
+                isHorizontalScrollBarEnabled = false
 
                 loadDataWithBaseURL("file:///", initialHtml, "text/html", "UTF-8", null)
                 onWebViewReady?.invoke(this)

@@ -16,21 +16,29 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.markdowneditor.ui.theme.AppTheme
+import com.markdowneditor.viewModel.AiSettingsViewModel
 import com.markdowneditor.viewModel.ThemeViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     onBackClick: () -> Unit = {},
-    themeViewModel: ThemeViewModel
+    themeViewModel: ThemeViewModel,
+    aiSettingsViewModel: AiSettingsViewModel = hiltViewModel()
 ) {
     val darkMode by themeViewModel.darkMode.collectAsState()
+    val apiKey by aiSettingsViewModel.apiKey.collectAsState()
+    val isKeySaved by aiSettingsViewModel.isKeySaved.collectAsState()
     var fontSize by remember { mutableStateOf(16f) }
     var showPrivacyPolicy by remember { mutableStateOf(false) }
     var showChangelog by remember { mutableStateOf(false) }
+    var showApiKeyDialog by remember { mutableStateOf(false) }
 
     if (showPrivacyPolicy) {
         WebViewDialog(
@@ -168,6 +176,95 @@ fun SettingsScreen(
                         Text("24", style = AppTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
                     }
                 }
+            }
+
+            SettingsSectionHeader(title = "AI 助手")
+
+            SettingsCard {
+                // API Key 状态与配置入口
+                Surface(
+                    onClick = { showApiKeyDialog = true },
+                    color = androidx.compose.ui.graphics.Color.Transparent
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = AppTheme.spacing.lg, vertical = AppTheme.spacing.md),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        SettingsIcon(
+                            icon = Icons.Default.Key,
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            iconColor = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(AppTheme.spacing.md))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "DeepSeek API Key",
+                                style = AppTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                if (isKeySaved) "已配置 · 点击可修改" else "未配置 · 点击设置",
+                                style = AppTheme.typography.bodySmall,
+                                color = if (isKeySaved) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+                            )
+                        }
+                        Icon(
+                            Icons.Default.ChevronRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                        )
+                    }
+                }
+
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                    modifier = Modifier.padding(horizontal = AppTheme.spacing.lg)
+                )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = AppTheme.spacing.lg, vertical = AppTheme.spacing.md),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SettingsIcon(
+                        icon = Icons.Default.AutoAwesome,
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        iconColor = MaterialTheme.colorScheme.secondary
+                    )
+                    Spacer(modifier = Modifier.width(AppTheme.spacing.md))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "AI 写作助手",
+                            style = AppTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            "在编辑器中输入需求，AI 帮你生成 Markdown 内容",
+                            style = AppTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        )
+                    }
+                }
+            }
+
+            // API Key 设置弹窗
+            if (showApiKeyDialog) {
+                ApiKeyDialog(
+                    currentKey = apiKey,
+                    onSave = { key ->
+                        aiSettingsViewModel.saveApiKey(key)
+                        showApiKeyDialog = false
+                    },
+                    onClear = {
+                        aiSettingsViewModel.clearApiKey()
+                        showApiKeyDialog = false
+                    },
+                    onDismiss = { showApiKeyDialog = false }
+                )
             }
 
             SettingsSectionHeader(title = "关于")
@@ -532,4 +629,134 @@ private fun ChangelogEntry(version: String, items: List<String>) {
             )
         }
     }
+}
+
+@Composable
+private fun ApiKeyDialog(
+    currentKey: String,
+    onSave: (String) -> Unit,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var keyInput by remember { mutableStateOf(currentKey) }
+    var showKey by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(24.dp),
+        containerColor = MaterialTheme.colorScheme.surface,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(AppTheme.spacing.sm)
+            ) {
+                Icon(
+                    Icons.Default.Key,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    "DeepSeek API Key",
+                    style = AppTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(AppTheme.spacing.md)) {
+                Text(
+                    "输入你的 DeepSeek API Key，用于驱动编辑器内的 AI 写作助手。Key 仅保存在本地设备中。",
+                    style = AppTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        "获取 Key: platform.deepseek.com → API Keys",
+                        style = AppTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(AppTheme.spacing.md)
+                    )
+                }
+
+                OutlinedTextField(
+                    value = keyInput,
+                    onValueChange = { keyInput = it },
+                    label = { Text("API Key", style = AppTheme.typography.bodySmall) },
+                    placeholder = {
+                        Text(
+                            "sk-xxxxxxxxxxxxxxxx",
+                            style = AppTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                        )
+                    },
+                    singleLine = true,
+                    visualTransformation = if (showKey) VisualTransformation.None
+                        else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        IconButton(onClick = { showKey = !showKey }) {
+                            Icon(
+                                if (showKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = if (showKey) "隐藏" else "显示",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+                    )
+                )
+            }
+        },
+        confirmButton = {
+            FilledTonalButton(
+                onClick = { onSave(keyInput) },
+                enabled = keyInput.isNotBlank(),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                    disabledContentColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.5f)
+                )
+            ) {
+                Text("保存", style = AppTheme.typography.labelLarge)
+            }
+        },
+        dismissButton = {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(AppTheme.spacing.sm)
+            ) {
+                if (currentKey.isNotBlank()) {
+                    TextButton(
+                        onClick = onClear,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            "清除",
+                            style = AppTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+                TextButton(
+                    onClick = onDismiss,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        "取消",
+                        style = AppTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    )
 }

@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>渐变状态栏预览</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, 'Microsoft YaHei', sans-serif; background: #e8e8e8; padding: 20px; display: flex; flex-wrap: wrap; gap: 24px; justify-content: center; }
+
+h2 { margin: 0 0 12px; font-size: 15px; color: #333; }
+.phone { width: 360px; border-radius: 24px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.2); background: #FBFDF7; }
+.phone.dark { background: #1A1C19; }
+
+/* 当前效果: 垂直渐变 primary → surface */
+.gradient-vertical {
+  height: 36px;
+  background: linear-gradient(to bottom, #2E7D32 0%, #FBFDF7 100%);
+  display: flex; align-items: center; padding-left: 20px;
+}
+.phone.dark .gradient-vertical {
+  background: linear-gradient(to bottom, #6BDB73 0%, #1A1C19 100%);
+}
+
+.time { font-size: 12px; color: white; font-weight: 600; }
+
+.topbar {
+  height: 52px; background: #FBFDF7; display: flex; align-items: center;
+  padding: 0 14px; border-bottom: 1px solid #DDE5D9;
+}
+.phone.dark .topbar { background: #1A1C19; border-color: #414942; }
+.phone.dark .title { color: #E2E3DD !important; }
+.topbar .menu { width: 22px; height: 22px; background: #717971; border-radius: 4px; margin-right: 12px; }
+.topbar .title { font-size: 17px; color: #1A1C19; font-weight: 600; }
+.topbar .actions { margin-left: auto; display: flex; gap: 10px; }
+.topbar .action { width: 22px; height: 22px; background: #717971; border-radius: 4px; }
+
+.content { padding: 14px; padding-bottom: 80px; position: relative; }
+.file-item {
+  display: flex; align-items: center; padding: 10px 12px; border-radius: 12px;
+  margin-bottom: 8px; border: 1px solid #DDE5D9;
+}
+.phone.dark .file-item { background: #2A2D28; border-color: #414942; }
+.file-icon { width: 38px; height: 38px; background: #E8F5E9; border-radius: 10px; margin-right: 12px; }
+.phone.dark .file-icon { background: #2A2D28; }
+.file-name { font-size: 14px; color: #1A1C19; }
+.phone.dark .file-name { color: #E2E3DD; }
+.file-date { font-size: 11px; color: #717971; margin-top: 2px; }
+
+.fab {
+  position: absolute; bottom: 16px; right: 16px;
+  width: 52px; height: 52px; background: #2E7D32; border-radius: 16px;
+  box-shadow: 0 4px 12px rgba(46,125,50,0.3);
+}
+.phone.dark .fab { background: #6BDB73; }
+
+.label { font-size: 12px; color: #888; margin-top: 8px; text-align: center; }
+
+.col { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+
+/* 设置页面预览 */
+.settings-content { padding: 14px; }
+.setting-item {
+  padding: 14px; border-radius: 12px; background: white;
+  border: 1px solid #DDE5D9; margin-bottom: 8px;
+}
+.phone.dark .setting-item { background: #2A2D28; border-color: #414942; }
+.setting-label { font-size: 14px; color: #1A1C19; }
+.phone.dark .setting-label { color: #E2E3DD; }
+.setting-sub { font-size: 11px; color: #717971; margin-top: 2px; }
+</style>
+</head>
+<body>
+
+<!-- 首页 浅色 -->
+<div class="col">
+  <h2>首页 — 浅色模式（当前效果）</h2>
+  <div class="phone">
+    <div class="gradient-vertical">
+      <div class="time">9:41</div>
+    </div>
+    <div class="topbar">
+      <div class="menu"></div>
+      <div class="title">Mdown</div>
+      <div class="actions"><div class="action"></div><div class="action"></div></div>
+    </div>
+    <div class="content">
+      <div class="file-item"><div class="file-icon"></div><div><div class="file-name">我的笔记.md</div><div class="file-date">5月2日 14:30</div></div></div>
+      <div class="file-item"><div class="file-icon"></div><div><div class="file-name">项目文档.md</div><div class="file-date">5月1日 09:15</div></div></div>
+      <div class="file-item"><div class="file-icon"></div><div><div class="file-name">README.md</div><div class="file-date">4月30日 18:42</div></div></div>
+      <div class="fab"></div>
+    </div>
+  </div>
+  <div class="label">primary (#2E7D32) → surface (#FBFDF7) 垂直渐变</div>
+</div>
+
+<!-- 首页 深色 -->
+<div class="col">
+  <h2>首页 — 深色模式（当前效果）</h2>
+  <div class="phone dark">
+    <div class="gradient-vertical">
+      <div class="time">9:41</div>
+    </div>
+    <div class="topbar">
+      <div class="menu"></div>
+      <div class="title">Mdown</div>
+      <div class="actions"><div class="action"></div><div class="action"></div></div>
+    </div>
+    <div class="content">
+      <div class="file-item"><div class="file-icon"></div><div><div class="file-name">我的笔记.md</div><div class="file-date">5月2日 14:30</div></div></div>
+      <div class="file-item"><div class="file-icon"></div><div><div class="file-name">项目文档.md</div><div class="file-date">5月1日 09:15</div></div></div>
+      <div class="fab"></div>
+    </div>
+  </div>
+  <div class="label">primary (#6BDB73) → surface (#1A1C19) 垂直渐变</div>
+</div>
+
+<!-- 设置页 浅色 -->
+<div class="col">
+  <h2>设置页 — 浅色模式（当前效果）</h2>
+  <div class="phone">
+    <div class="gradient-vertical">
+      <div class="time">9:41</div>
+    </div>
+    <div class="topbar">
+      <div class="menu"></div>
+      <div class="title">设置</div>
+      <div class="actions"></div>
+    </div>
+    <div class="settings-content">
+      <div class="setting-item"><div class="setting-label">深色模式</div><div class="setting-sub">减少眼睛疲劳，适合夜间使用</div></div>
+      <div class="setting-item"><div class="setting-label">更新日志</div><div class="setting-sub">查看版本更新记录</div></div>
+      <div class="setting-item"><div class="setting-label">隐私政策</div><div class="setting-sub">了解我们如何保护您的数据</div></div>
+    </div>
+  </div>
+  <div class="label">设置页同样适配垂直渐变</div>
+</div>
+
+<!-- 设置页 深色 -->
+<div class="col">
+  <h2>设置页 — 深色模式（当前效果）</h2>
+  <div class="phone dark">
+    <div class="gradient-vertical">
+      <div class="time">9:41</div>
+    </div>
+    <div class="topbar">
+      <div class="menu"></div>
+      <div class="title">设置</div>
+      <div class="actions"></div>
+    </div>
+    <div class="settings-content">
+      <div class="setting-item"><div class="setting-label">深色模式</div><div class="setting-sub">减少眼睛疲劳，适合夜间使用</div></div>
+      <div class="setting-item"><div class="setting-label">更新日志</div><div class="setting-sub">查看版本更新记录</div></div>
+    </div>
+  </div>
+  <div class="label">设置页深色模式渐变</div>
+</div>
+
+</body>
+</html>
