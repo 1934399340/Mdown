@@ -324,5 +324,21 @@ app/src/main/java/com/markdowneditor/
 
 ---
 
+### A. 截图
+
+| 编号 | 页面 | 说明 |
+|------|------|------|
+| 05 | [AI 聊天栏](screenshots/05_ai_chat_bar.png) | 底部 AI 输入框 |
+| 06 | [导出弹窗](screenshots/06_export_dialog.png) | 多格式导出选项 |
+| 07 | [文件列表](screenshots/07_file_list.png) | 带文件卡片的列表 |
+| 08 | [侧边栏](screenshots/08_drawer_menu.png) | 导航抽屉 |
+| 09 | [设置页](screenshots/09_settings_page.png) | 深色模式、字体等 |
+| 10 | [AI 设置](screenshots/10_ai_settings.png) | DeepSeek API Key 配置 |
+| 11 | [首页带文件](screenshots/11_home_with_files.jpg) | 文件列表主页面 |
+| 12 | [编辑器+AI](screenshots/12_editor_with_ai.jpg) | WYSIWYG 编辑 + AI 写作 |
+| 13 | [导出结果](screenshots/13_export_result.jpg) | 文件导出成功 |
+
+---
+
 > 📅 最后更新：2026-06-10  
 > 📧 联系方式：通过项目 Issue 反馈

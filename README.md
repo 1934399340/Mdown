@@ -9,9 +9,9 @@
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 <p align="center">
-  <img src="docs/screenshots/01_home_page.png" width="30%" />
-  <img src="docs/screenshots/03_editor_page.png" width="30%" />
-  <img src="docs/screenshots/05_ai_chat_bar.png" width="30%" />
+  <img src="docs/screenshots/11_home_with_files.jpg" width="30%" />
+  <img src="docs/screenshots/12_editor_with_ai.jpg" width="30%" />
+  <img src="docs/screenshots/13_export_result.jpg" width="30%" />
 </p>
 
 ## ✨ 核心特性
@@ -53,13 +53,17 @@
 
 ## 📸 截图
 
-| 首页 | 编辑器 | AI 助手 |
-|------|--------|---------|
-| ![首页](docs/screenshots/01_home_page.png) | ![编辑器](docs/screenshots/03_editor_page.png) | ![AI](docs/screenshots/05_ai_chat_bar.png) |
+| 首页带文件 | 编辑器 + AI | 导出结果 |
+|-----------|------------|---------|
+| ![首页](docs/screenshots/11_home_with_files.jpg) | ![编辑器](docs/screenshots/12_editor_with_ai.jpg) | ![导出](docs/screenshots/13_export_result.jpg) |
 
-| 导出 | 设置 | AI 配置 |
-|------|------|---------|
-| ![导出](docs/screenshots/06_export_dialog.png) | ![设置](docs/screenshots/09_settings_page.png) | ![AI设置](docs/screenshots/10_ai_settings.png) |
+| AI 聊天栏 | 导出选项 | AI 配置 |
+|-----------|---------|---------|
+| ![AI聊天](docs/screenshots/05_ai_chat_bar.png) | ![导出](docs/screenshots/06_export_dialog.png) | ![AI配置](docs/screenshots/10_ai_settings.png) |
+
+| 文件列表 | 侧边栏 | 设置页 |
+|---------|--------|--------|
+| ![文件](docs/screenshots/07_file_list.png) | ![侧边栏](docs/screenshots/08_drawer_menu.png) | ![设置](docs/screenshots/09_settings_page.png) |
 
 ## 🏗️ 技术架构
 
